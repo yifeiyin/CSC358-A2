@@ -1,31 +1,33 @@
 import socket
 from socketserver import UDPServer, BaseRequestHandler
+import subprocess
 
 PORT = 1111
 
-class Host:
-    def __init__(self, ip):
-        self.ip = ip
 
-    def start(self):
+def send(dest, data):
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.sendto(data, (dest, PORT))
+
+
+class Host:
+    def __init__(self):
+        self.neighbors = self.find_neighbors()
+
+    def find_neighbors(self):
+        out = subprocess.run('ip neighbor', shell=True, stdout=subprocess.PIPE, universal_newlines=True).stdout
+        ips = [ line.split(' ')[0] for line in out.split('\n') if len(line) > 0 ]
+        return ips
+
+    def start_server(self):
         self.server = UDPServer(server_address=('', PORT), RequestHandlerClass=Handler)
         self.server.serve_forever()
+        print('test')
 
     def broadcast(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # sock.bind(('', 0))
-        try:
-            # sock.sendall(bytes('hello', 'utf-8'))
-            # sock.connect(('', PORT))
-            # sock.send(bytes('hello', 'utf-8'))
-            # sock.close()
-            # sock.sendto(bytes('hello', 'utf-8'), ('10.0.255.255', PORT))
-            sock.sendto(bytes('hello', 'utf-8'), ('10.0.0.1', PORT))
-# (b'hello', <socket.socket fd=5, family=AddressFamily.AF_INET, type=SocketKind.SOCK_DGRAM, proto=0, laddr=('0.0.0.0', 1111)>)
-# ('10.0.0.2', 38174) wrote: b'hello'
+        for neighbor in self.neighbors:
+            send(neighbor, b'Hello')
 
-        except Exception as e:
-            print(e)
 
 class Handler(BaseRequestHandler):
     def handle(self):
@@ -38,6 +40,6 @@ class Handler(BaseRequestHandler):
 
 
 if __name__ == '__main__':
-    h = Host('localhost')
+    h = Host()
     h.broadcast()
-    h.start()
+    h.start_server()
