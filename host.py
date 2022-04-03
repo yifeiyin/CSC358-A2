@@ -1,6 +1,9 @@
+# !/usr/bin/python
+
 import socket
 from socketserver import UDPServer, BaseRequestHandler
 import subprocess
+from sys import argv
 
 PORT = 1111
 
@@ -31,15 +34,26 @@ class Host:
 
 class Handler(BaseRequestHandler):
     def handle(self):
-        print(self.request)
         data, socket = self.request
         client_ip = self.client_address[0]
-
-        print(f"{self.client_address} wrote: {data}")
-        socket.sendto(data.upper(), (client_ip, PORT))
+        print(f"{client_ip} wrote: {data}")
 
 
 if __name__ == '__main__':
-    h = Host()
-    h.broadcast()
-    h.start_server()
+    if len(argv) == 1:
+        print('Aviable commands: start, broadcast, send <ip> <data>')
+        exit(1)
+
+    if argv[1] == 'start':
+        h = Host()
+        h.start_server()
+
+    elif argv[1] == 'broadcast':
+        h = Host()
+        h.broadcast()
+
+    elif argv[1] == 'send':
+        if len(argv) != 4:
+            print('Wrong number of arguments')
+            exit(1)
+        send(argv[2], bytes(argv[3], 'utf-8'))
