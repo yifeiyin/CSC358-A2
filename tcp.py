@@ -1,5 +1,5 @@
 import socket
-from socketserver import UDPServer, BaseRequestHandler
+from socketserver import TCPServer, BaseRequestHandler
 
 PORT = 1111
 
@@ -8,7 +8,7 @@ class Host:
         self.ip = ip
 
     def start(self):
-        self.server = UDPServer(server_address=('', PORT), RequestHandlerClass=Handler)
+        self.server = TCPServer(server_address=('', PORT), RequestHandlerClass=Handler)
         self.server.serve_forever()
 
     def broadcast(self):
