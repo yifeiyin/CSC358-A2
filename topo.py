@@ -59,7 +59,10 @@ def disconnect(a, b):
 
 def net2():
     """
-    h1 <->
+           h1
+           ^
+           |
+           v
     h2 <-> r1 <-> r2 <-> h3
     """
     net = Mininet(controller=Controller, waitConnected=True, autoSetMacs=True)
