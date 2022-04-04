@@ -160,8 +160,8 @@ class RouterHandler(BaseRequestHandler):
         if current_entry is None:
             logger.debug(f'Adding new forwarding table entry: {src} is at {client_ip}')
             self.router.forwarding_table[src] = (client_ip, 1)
-        elif current_entry != client_ip:
-            logger.fatal(f"Conflicting forwarding table: got {src} from {client_ip}, previously at {current_entry}")
+        elif current_entry[0] != client_ip:
+            logger.error(f"Conflicting forwarding table: got {src} from {client_ip}, previously at {current_entry}")
         else:
             logger.debug(f"{src} is already forwarded to {client_ip}")
             pass
@@ -277,12 +277,13 @@ if __name__ == '__main__':
 
     elif argv[1] == 'send':
         if len(argv) <= 2:
-            logger.error('send <neighbor> <dst> [ttl]')
+            logger.error('send <dst> [ttl]')
             exit(1)
-        through = normalize_ip(argv[2])
-        dst = normalize_ip(argv[3])
+        assert len(neighbors) == 1
+        through = neighbors[0]
+        dst = normalize_ip(argv[2])
         src = my_ip
-        ttl = int(argv[4]) if len(argv) > 4 else 5
+        ttl = int(argv[3]) if len(argv) > 4 else 5
         send(through, { 'src': src, 'dst': dst, 'ttl': ttl })
 
     elif argv[1] == 'get':
