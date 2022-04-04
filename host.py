@@ -8,7 +8,7 @@ from sys import argv
 import json
 import logging
 from log_helper import ColorLogFormatter
-from algo import ospf_algo
+from algo import ospf_algo, rip_new_table
 
 console = logging.StreamHandler()
 console.setLevel(logging.DEBUG)
@@ -74,12 +74,12 @@ class Host:
     def broadcast(self, ttl=0):
         logger.debug(f'Broadcasting with {ttl=}')
         for neighbor in self.neighbors:
-            send(neighbor, { 'src':  my_ip, 'dst': 'ALL', 'ttl': ttl })
+            send(neighbor, { 'src': my_ip, 'dst': 'ALL', 'ttl': ttl })
 
 
 class HostHandler(BaseRequestHandler):
     def handle(self):
-        data, socket = self.request
+        data, = self.request
         data_len = len(data)
         client_ip = self.client_address[0]
         data = decode(data)
@@ -101,6 +101,7 @@ class HostHandler(BaseRequestHandler):
 class Router:
     def __init__(self):
         self.forwarding_table = {}
+        self.rip_mode = False
         assert RouterHandler.router is None
         RouterHandler.router = self
 
@@ -109,12 +110,25 @@ class Router:
         self.server = UDPServer(server_address=('', PORT), RequestHandlerClass=RouterHandler)
         self.server.serve_forever()
 
+    def broadcast(self, ttl=0):
+        logger.debug(f'Broadcasting with {ttl=}')
+        for neighbor in self.neighbors:
+            send(neighbor, { 'src': my_ip, 'dst': 'ALL', 'ttl': ttl })
+
+    def broadcast_for_rip(self):
+        logger.debug(f'Broadcasting forwarding table')
+        for neighbor in self.neighbors:
+            send(neighbor, { 'rip-update': self.forwarding_table, 'src': my_ip, 'dst': neighbor })
+
 
 class RouterHandler(BaseRequestHandler):
     router = None
     def handle_monitor_request(self, data):
         request = data['request']
-        if request == 'get-table':
+        if request == 'rip':
+            logger.info('Activating RIP mode')
+            self.router.rip_mode = True
+        elif request == 'get-table':
             logger.debug(f'Sending forwarding table')
             # sleep(0.1 * int(my_ip[-1]))
             send(monitor_ip, { 'table': self.router.forwarding_table })
@@ -126,15 +140,11 @@ class RouterHandler(BaseRequestHandler):
             logger.info(f'Setting table to {data["table"]}')
             assert data['table'] is not None
             self.router.forwarding_table = data['table']
-        elif request == 'advertise':
-            logger.error('Unimplemented')
-        elif request == 'update':
-            logger.error('Unimplemented')
         else:
             logger.error(f'Unknown request: {request}')
 
     def handle(self):
-        data, socket = self.request
+        data, = self.request
         data_len = len(data)
         client_ip = self.client_address[0]
         data = decode(data)
@@ -147,6 +157,16 @@ class RouterHandler(BaseRequestHandler):
             self.handle_monitor_request(data)
             return
 
+        if data.get('rip-update') is not None:
+            logger.debug('It was a rip update message')
+            if data['dst'] != my_ip:
+                logger.critical(f'Unexpected rip update message, intended for {data["dst"]} but I am {my_ip}')
+            new_table = rip_new_table(self.router.forwarding_table, data['rip-update'], src=data['src'])
+            if new_table is not None:
+                self.router.forwarding_table = new_table
+                self.router.broadcast_for_rip()
+            return
+
         logger.debug('It was a routing request')
         src = data['src']
         dst = data['dst']
@@ -156,10 +176,13 @@ class RouterHandler(BaseRequestHandler):
             logger.error(f'Unexpected packet for router from {src}. Dropping.')
             return
 
+        forwarding_table_changed = False
+
         current_entry = self.router.forwarding_table.get(src, None)
         if current_entry is None:
             logger.debug(f'Adding new forwarding table entry: {src} is at {client_ip}')
             self.router.forwarding_table[src] = (client_ip, 1)
+            forwarding_table_changed = True
         elif current_entry[0] != client_ip:
             logger.error(f"Conflicting forwarding table: got {src} from {client_ip}, previously at {current_entry}")
         else:
@@ -168,19 +191,23 @@ class RouterHandler(BaseRequestHandler):
 
         if ttl == 0:
             logger.warning(f'Dropping packet from {src} to {dst} due to TTL')
-            return
 
-        if dst == 'ALL':
+        elif dst == 'ALL':
             logger.debug(f'Broadcasting packet from {src} to {dst}')
             for neighbor in self.router.neighbors:
+                if neighbor == client_ip: continue # Don't send it to source
                 send(neighbor, { 'src': src, 'dst': dst, 'ttl': ttl - 1 })
 
-        if dst in self.router.forwarding_table:
+        elif dst in self.router.forwarding_table:
             logger.debug(f'Forwarding packet from {src} to {dst}')
             send(self.router.forwarding_table[dst][0], { 'src': src, 'dst': dst, 'ttl': ttl - 1 })
 
         else:
             logger.warning(f'Dropping packet from {src} to {dst} due to no route')
+
+        if forwarding_table_changed and self.router.rip_mode:
+            logger.debug(f'Sending RIP update')
+            self.router.broadcast_for_rip()
 
 
 class Monitor:
@@ -200,10 +227,6 @@ class Monitor:
         for neighbor in neighbors:
             send(neighbor, { 'request': 'print-table' })
 
-    def calculate_table(self):
-        table = {}
-        return table
-
     def start_server(self):
         logger.info('Starting monitor server')
         self.server = UDPServer(server_address=('', PORT), RequestHandlerClass=MonitorHandler)
@@ -214,8 +237,7 @@ class MonitorHandler(BaseRequestHandler):
     monitor: Monitor = None
 
     def handle(self):
-        data, socket = self.request
-        data_len = len(data)
+        data, = self.request
         client_ip = self.client_address[0]
         data = decode(data)
         logger.info(f"Received routing table from {client_ip}")
@@ -266,6 +288,7 @@ if __name__ == '__main__':
 
     elif argv[1] == 'start':
         h = Router()
+        h.broadcast()
         h.start_server()
 
     elif argv[1] == 'broadcast':
