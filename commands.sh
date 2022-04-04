@@ -11,5 +11,5 @@ function ssend() {
 }
 
 function sbr() {
-  c/host.py broadcast
+  c/host.py broadcast "$@"
 }
