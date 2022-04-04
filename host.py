@@ -62,6 +62,9 @@ def get_neighbors():
 neighbors = get_neighbors()
 
 
+
+
+
 class Host:
     def __init__(self):
         self.neighbors = neighbors
@@ -79,11 +82,18 @@ class Host:
 
 class HostHandler(BaseRequestHandler):
     def handle(self):
-        data, = self.request
+        data = self.request[0]
         data_len = len(data)
         client_ip = self.client_address[0]
         data = decode(data)
         logger.info(f"Received {data_len}b from {client_ip}: {data}")
+
+        if 'rip-update' in data:
+            logger.debug('Ignoring routing packet')
+            return
+        if 'monitor-request' in data:
+            logger.debug('Ignoring monitor request')
+            return
 
         src = data['src']
         dst = data['dst']
@@ -95,6 +105,8 @@ class HostHandler(BaseRequestHandler):
         else:
             logger.error(f'Unexpected packet from {src}: {data=}')
             return
+
+
 
 
 
@@ -112,39 +124,44 @@ class Router:
 
     def broadcast(self, ttl=0):
         logger.debug(f'Broadcasting with {ttl=}')
-        for neighbor in self.neighbors:
+        for neighbor in neighbors:
             send(neighbor, { 'src': my_ip, 'dst': 'ALL', 'ttl': ttl })
 
     def broadcast_for_rip(self):
         logger.debug(f'Broadcasting forwarding table')
-        for neighbor in self.neighbors:
+        for neighbor in neighbors:
             send(neighbor, { 'rip-update': self.forwarding_table, 'src': my_ip, 'dst': neighbor })
 
 
 class RouterHandler(BaseRequestHandler):
-    router = None
+    router: Router = None
     def handle_monitor_request(self, data):
-        request = data['request']
-        if request == 'rip':
-            logger.info('Activating RIP mode')
-            self.router.rip_mode = True
-        elif request == 'get-table':
+        request = data['monitor-request']
+        if request == 'change-rip-status':
+            enabled = data['enabled']
+            logger.info(f'Setting RIP mode to {enabled}')
+            self.router.rip_mode = enabled
+        elif request == 'request-rip-table-for-ospf':
             logger.debug(f'Sending forwarding table')
-            # sleep(0.1 * int(my_ip[-1]))
             send(monitor_ip, { 'table': self.router.forwarding_table })
-        elif request == 'print-table':
+        elif request == 'print-forwarding-table':
             from pprint import pprint
             logger.info(f'Here is the current forwarding table as requested:')
             pprint(self.router.forwarding_table)
         elif request == 'set-table':
-            logger.info(f'Setting table to {data["table"]}')
+            logger.info(f"Setting table to {data['table']}")
             assert data['table'] is not None
             self.router.forwarding_table = data['table']
+        elif request == 'trigger-rip':
+            if not self.router.rip_mode:
+                logger.error('Sending RIP update, despite not in RIP mode')
+            logger.debug(f'Sending RIP update')
+            self.router.broadcast_for_rip()
         else:
             logger.error(f'Unknown request: {request}')
 
     def handle(self):
-        data, = self.request
+        data = self.request[0]
         data_len = len(data)
         client_ip = self.client_address[0]
         data = decode(data)
@@ -152,19 +169,21 @@ class RouterHandler(BaseRequestHandler):
 
         assert self.router is not None
 
-        if data.get('request') is not None:
-            logger.debug('It was a forwarding table request')
+        if data.get('monitor-request') is not None:
+            logger.debug('It was a monitor node request')
             self.handle_monitor_request(data)
             return
 
         if data.get('rip-update') is not None:
             logger.debug('It was a rip update message')
             if data['dst'] != my_ip:
-                logger.critical(f'Unexpected rip update message, intended for {data["dst"]} but I am {my_ip}')
-            new_table = rip_new_table(self.router.forwarding_table, data['rip-update'], src=data['src'])
+                logger.critical(f"Unexpected rip update message, intended for {data['dst']} but I am {my_ip}")
+            new_table = rip_new_table(self.router.forwarding_table, my_ip, data['rip-update'], data['src'])
             if new_table is not None:
                 self.router.forwarding_table = new_table
                 self.router.broadcast_for_rip()
+            else:
+                logger.debug('Routing table unchanged')
             return
 
         logger.debug('It was a routing request')
@@ -210,22 +229,36 @@ class RouterHandler(BaseRequestHandler):
             self.router.broadcast_for_rip()
 
 
+
+
+
 class Monitor:
     def __init__(self):
         self.table_received = None
         assert MonitorHandler.monitor is None
         MonitorHandler.monitor = self
 
-    def request_update(self):
+    def trigger_ospf(self):
         for neighbor in neighbors:
-            send(neighbor, { 'request': 'get-table' })
+            send(neighbor, { 'monitor-request': 'request-rip-table-for-ospf' })
+
+    def trigger_rip(self, target_ip=None):
+        if target_ip is None:
+            for neighbor in neighbors:
+                send(neighbor, { 'monitor-request': 'trigger-rip' })
+        else:
+            send(target_ip, { 'monitor-request': 'trigger-rip' })
+
+    def rip_mode(self, enabled):
+        for neighbor in neighbors:
+            send(neighbor, { 'monitor-request': 'change-rip-status', 'enabled': enabled })
 
     def print_table(self, router_ip):
-        send(router_ip, { 'request': 'print-table' })
+        send(router_ip, { 'monitor-request': 'print-forwarding-table' })
 
     def print_all_table(self):
         for neighbor in neighbors:
-            send(neighbor, { 'request': 'print-table' })
+            send(neighbor, { 'monitor-request': 'print-forwarding-table' })
 
     def start_server(self):
         logger.info('Starting monitor server')
@@ -237,7 +270,7 @@ class MonitorHandler(BaseRequestHandler):
     monitor: Monitor = None
 
     def handle(self):
-        data, = self.request
+        data = self.request[0]
         client_ip = self.client_address[0]
         data = decode(data)
         logger.info(f"Received routing table from {client_ip}")
@@ -256,7 +289,7 @@ class MonitorHandler(BaseRequestHandler):
             tables_to_send = ospf_algo(self.monitor.table_received)
             self.monitor.table_received = None
             for neighbor in neighbors:
-                send(neighbor, { 'request': 'set-table', 'table': tables_to_send[neighbor] })
+                send(neighbor, { 'monitor-request': 'set-table', 'table': tables_to_send[neighbor] })
             return
         else:
             logger.debug(f'Still waiting response from {not_received}')
@@ -265,13 +298,6 @@ class MonitorHandler(BaseRequestHandler):
 
 if __name__ == '__main__':
     logger.debug(f'Found neighbors: {neighbors}')
-
-    # logger.debug('Hello')
-    # logger.info('Hello')
-    # logger.warning('Hello')
-    # logger.error('Hello')
-    # logger.critical('Hello')
-
 
     if len(argv) == 1:
         logger.error('Available commands: start, broadcast, send, get')
@@ -309,9 +335,9 @@ if __name__ == '__main__':
         ttl = int(argv[3]) if len(argv) > 4 else 5
         send(through, { 'src': src, 'dst': dst, 'ttl': ttl })
 
-    elif argv[1] == 'get':
+    elif argv[1] == 'print':
         if len(argv) <= 2:
-            logger.error('get <router | all>')
+            logger.error('print <router | all>')
             exit(1)
         m = Monitor()
         if argv[2] == 'all':
@@ -319,6 +345,25 @@ if __name__ == '__main__':
         else:
             m.print_table(normalize_ip(argv[2]))
 
-    elif argv[1] == 'update':
+    elif argv[1] == 'trigger-ospf':
         m = Monitor()
-        m.request_update()
+        m.trigger_ospf()
+
+    elif argv[1] == 'trigger-rip':
+        if len(argv) <= 2:
+            logger.error('trigger-rip <router | all>')
+            exit(1)
+        m = Monitor()
+        m.trigger_rip(None if argv[2] == 'all' else normalize_ip(argv[2]))
+
+    elif argv[1] == 'rip-on':
+        m = Monitor()
+        m.rip_mode(True)
+
+    elif argv[1] == 'rip-off':
+        m = Monitor()
+        m.rip_mode(False)
+
+    else:
+        logger.error(f'Unknown command: {argv[1]}')
+        exit(1)
