@@ -158,6 +158,8 @@ class RouterHandler(BaseRequestHandler):
                 logger.error('Sending RIP update, despite not in RIP mode')
             logger.debug(f'Sending RIP update')
             self.router.broadcast_for_rip()
+        elif request == 'broadcast-with-ttl-0':
+            self.router.broadcast()
         else:
             logger.error(f'Unknown request: {request}')
 
@@ -239,6 +241,10 @@ class Monitor:
         assert MonitorHandler.monitor is None
         MonitorHandler.monitor = self
 
+    def trigger_br_all(self):
+        for neighbor in neighbors:
+            send(neighbor, { 'monitor-request': 'broadcast-with-ttl-0' })
+
     def trigger_ospf(self):
         for neighbor in neighbors:
             send(neighbor, { 'monitor-request': 'request-rip-table-for-ospf' })
@@ -304,13 +310,13 @@ if __name__ == '__main__':
         logger.error('Available commands: start, broadcast, send, get')
         exit(1)
 
-    if argv[1] == 'start' and len(neighbors) == 1:
-        h = Host()
-        h.broadcast()
+    if argv[1] == 'start' and my_ip.endswith('255'):
+        h = Monitor()
         h.start_server()
 
-    elif argv[1] == 'start' and my_ip.endswith('255'):
-        h = Monitor()
+    elif argv[1] == 'start' and len(neighbors) == 1:
+        h = Host()
+        h.broadcast()
         h.start_server()
 
     elif argv[1] == 'start':
@@ -342,6 +348,10 @@ if __name__ == '__main__':
             m.print_all_table()
         else:
             m.print_table(normalize_ip(argv[2]))
+
+    elif argv[1] == 'br-all':
+        m = Monitor()
+        m.trigger_br_all()
 
     elif argv[1] == 'trigger-ospf':
         m = Monitor()

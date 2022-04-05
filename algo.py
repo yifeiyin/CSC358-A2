@@ -35,7 +35,10 @@ def rip_new_table(current_table, my_ip, new_table, new_table_src):
         all_dst.add(dst)
     for dst in new_table:
         all_dst.add(dst)
-    all_dst.remove(my_ip)
+    try:
+        all_dst.remove(my_ip)
+    except KeyError:
+        pass
 
     result = {}
 
@@ -47,8 +50,7 @@ def rip_new_table(current_table, my_ip, new_table, new_table_src):
                 current_min = cost
                 best_next_hop = next_hop
 
-        cost_of_me_to_new_table_src = current_table[new_table_src][1]
-        # cost_of_me_to_new_table_src = current_table.get(new_table_src, (0, 1))[1]
+        cost_of_me_to_new_table_src = current_table.get(new_table_src, [0, 1])[1]
         for this_dst, (next_hop, cost) in new_table.items():
             if this_dst == dst and cost + cost_of_me_to_new_table_src < current_min:
                 current_min = cost + cost_of_me_to_new_table_src

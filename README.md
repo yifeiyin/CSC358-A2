@@ -1,3 +1,13 @@
+CSC358 A2
+
+Yifei Yin
+
+2022-04-04
+
+[TOC]
+
+
+
 ## File organization overview
 
 - `algo.py`: logic for the core algorithms (OSPF and RIP)
@@ -11,7 +21,6 @@
 Here is how the virtual network nodes are linked together in mininet. Every node in my setup is a mininet "host". All nodes are connected to a single switch, thus making them all reachable from one another in mininet. All nodes have static ip and incremental mac addresses.
 
 To "connect" or "disconnect" nodes in my setup, ARP entries are set on each machine: for "connect", an ARP entry is set; for "disconnect" an invalid ARP entry is set, making the nodes unreachable. (see function `connect` and `disconnect` in `topo.py`)
-
 
 
 ## Different types of servers (`host.py`)
@@ -30,7 +39,7 @@ In `topo.py`, `Host`s are assigned with ip starting `10.0.0.1`; `Router`s are as
 
 ## How the node works (`host.py`)
 
-All communication are done over UDP. All UDP ports are 1111.
+All communication are done over UDP. All UDP ports are 1111 (see `PORT` in `host.py`).
 
 Each node should have a long running process, that receives data from UDP. Upon receiving data, it will act accordingly – discards it, forwards it, re-calculates forwarding table, send some message to another node, etc.
 
@@ -70,6 +79,16 @@ First, `mkdir c`, then copy code into `/home/mininet/c/`. All files will live in
 chmod +x /home/mininet/c/host.py
 ```
 
+Start mininet:
+```
+sudo python c/topo.py <net#>
+```
+- where net is 1 or 2 or 3
+- 1 is very simple
+- 2 is moderate complicity
+- 3 is really complex
+- see code for graphs
+
 Now running this should give:
 ```
 root@mininet-vm:/home/mininet# c/host.py
@@ -102,5 +121,14 @@ Friendly note: for IP, you can input `10` and it will auto-prefix making it `10.
 - Tell router to do a RIP broadcast (as if the forwarding table has just changed): `c/host.py trigger-rip <router_ip>`
 - Tell all routers to use RIP: `c/host.py rip-on`
 - Tell all routers to not use RIP: `c/host.py rip-off`
+- Tell all routers to boardcast themselves with ttl=0: `c/host.py br-all`
+
+
+## Performance
+
+For a small network (i.e. net1 or net2), RIP works fine. It's easy to implement in the real world since no additional centralized server set up is needed. However, when RIP is used on net3, the initial RIP update took a significant amount of time and a lot of data was printed in the terminal indicating a lot of bandwidth will be used in the real world. This huge network spike could be a problem. Additionally when the network is congested, certain routers might appear offline and if router decides to propagate the information to other routers, it could make the congestion worse.
+
+Using OSPF on net3 does not have this issue and the update was really fast and efficient – only one message to request, one response and send over a new forwarding table. Obviously there is the problem of single point of failure and the overhead of setting up and connecting this central server with all routers. Perhaps a modified OSPF can be implemented where multiple servers maintain the routing table and thus provide more reliability.
+
 
 
