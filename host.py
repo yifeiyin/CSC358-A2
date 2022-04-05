@@ -36,6 +36,7 @@ def send(neighbor, data):
         s.sendto(encode(data), (neighbor, PORT))
 
 def normalize_ip(ip):
+    """Allows user to input only the last part of the IP address"""
     if ip.startswith('10.0.0.'):
         return ip
     return f'10.0.0.{ip}'
@@ -99,7 +100,7 @@ class HostHandler(BaseRequestHandler):
         dst = data['dst']
         ttl = data['ttl']
 
-        if dst == my_ip:
+        if dst == my_ip or dst == 'ALL':
             logger.info(f'Received packet FOR ME from {src}! Dropping.')
             return
         else:
@@ -318,9 +319,6 @@ if __name__ == '__main__':
         h.start_server()
 
     elif argv[1] == 'broadcast':
-        print(argv)
-        if len(neighbors) != 1:
-            logger.warning('Broadcasting despite neighbor count is not 1')
         h = Host()
         h.broadcast(ttl=int(argv[2]) if len(argv) > 2 else 0)
 

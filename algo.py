@@ -9,7 +9,7 @@ def ospf_algo(tables):
 
     for router, routing_table in tables.items():
         for dst, (next_hop, cost) in routing_table.items():
-            if cost != 1: continue # Skip non-neighbor entries
+            if cost != 1: continue
             if dst in adjacency_list:
                 adjacency_list[dst].append(router)
             else:
@@ -64,6 +64,7 @@ def rip_new_table(current_table, my_ip, new_table, new_table_src):
 
 
 if __name__ == '__main__':
+    print('Running tests')
     # h1 <-> r1 <-> r2 <-> h3
     #        ^      ^
     #        |      |
