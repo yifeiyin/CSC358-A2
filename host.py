@@ -133,6 +133,9 @@ class Router:
         for neighbor in neighbors:
             send(neighbor, { 'rip-update': self.forwarding_table, 'src': my_ip, 'dst': neighbor })
 
+    def clear_all_table(self):
+        logger.info('Clearing routing table')
+        self.forwarding_table = {}
 
 class RouterHandler(BaseRequestHandler):
     router: Router = None
@@ -160,6 +163,8 @@ class RouterHandler(BaseRequestHandler):
             self.router.broadcast_for_rip()
         elif request == 'broadcast-with-ttl-0':
             self.router.broadcast()
+        elif request == 'clear_all_table':
+            self.router.clear_all_table()
         else:
             logger.error(f'Unknown request: {request}')
 
@@ -259,6 +264,13 @@ class Monitor:
     def rip_mode(self, enabled):
         for neighbor in neighbors:
             send(neighbor, { 'monitor-request': 'change-rip-status', 'enabled': enabled })
+
+    def clear_all_table(self, router_ip):
+        if router_ip is None:
+            for neighbor in neighbors:
+                send(neighbor, { 'monitor-request': 'clear_all_table' })
+        else:
+            send(router_ip, { 'monitor-request': 'clear_all_table' })
 
     def print_table(self, router_ip):
         send(router_ip, { 'monitor-request': 'print-forwarding-table' })
@@ -371,6 +383,10 @@ if __name__ == '__main__':
     elif argv[1] == 'rip-off':
         m = Monitor()
         m.rip_mode(False)
+
+    elif argv[1] == 'clear':
+        m = Monitor()
+        m.clear_all_table(None if len(argv) <= 2 else normalize_ip(argv[2]))
 
     else:
         logger.error(f'Unknown command: {argv[1]}')
